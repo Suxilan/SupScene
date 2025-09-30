@@ -5,7 +5,6 @@ from .projection import DinoProjection, MoCoProjection
 from typing import Optional
 class DistillHead(nn.Module):
     """
-    蒸馏头：内部复用 DINO 或 MoCo 投影。
     forward(z) -> q_distill
     """
     def __init__(self, in_dim:int, style:str="dino", **kwargs):

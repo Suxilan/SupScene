@@ -1,11 +1,3 @@
-"""
-投影头（Projection Heads）
-- DinoProjection: 深层MLP + 权重归一化最后层（DINO风格）
-- MoCoProjection: 标准MLP + 可选最后层BN（MoCo/SimCLR风格）
-两者输入/输出统一：
-  x: [B, N, D_in]  ->  z: [B, N, D_out]
-可选 node_mask: [B, N]
-"""
 from typing import Optional
 
 import torch
@@ -15,7 +7,9 @@ import torch.nn.functional as F
 from .base import BaseHead
 
 def trunc_normal_(tensor, mean=0.0, std=1.0, a: float = -2.0, b: float = 2.0):
-    """截断正态分布初始化"""
+    """
+    Truncated normal initialization.
+    """
     def norm_cdf(x):
         return (1.0 + torch.erf(x / torch.sqrt(torch.tensor(2.0)))) / 2.0
 
@@ -29,10 +23,11 @@ def trunc_normal_(tensor, mean=0.0, std=1.0, a: float = -2.0, b: float = 2.0):
         tensor.clamp_(min=a, max=b)
         return tensor
 
-
+# Code adapted from SALAD, Apache 2.0 license
+# https://github.com/facebookresearch/dinov2/blob/main/dinov2/layers/dino_head.py
 class DinoProjection(BaseHead):
     """
-    DINO 风格投影头：深层 MLP -> L2 Norm -> 线性（权重行归一）
+    MLP -> L2 Norm -> linear (weight normalized)
     """
 
     def __init__(
@@ -47,14 +42,12 @@ class DinoProjection(BaseHead):
     ):
         super().__init__(in_dim, out_dim)
         
-        # MLP主体
         nlayers = max(nlayers, 1)
         self.mlp = self._build_mlp(
             nlayers, in_dim, bottleneck_dim, 
             hidden_dim=hidden_dim, use_bn=use_bn, bias=mlp_bias
         )
         
-        # 权重归一化的最后层 (DINO关键设计)
         self.last_layer = nn.Linear(bottleneck_dim, out_dim, bias=False)
         with torch.no_grad():
             weight_norm = torch.norm(self.last_layer.weight.data, dim=1, keepdim=True)
@@ -63,7 +56,7 @@ class DinoProjection(BaseHead):
         self.apply(self._init_weights)
     
     def _build_mlp(self, nlayers, in_dim, bottleneck_dim, hidden_dim=None, use_bn=False, bias=True):
-        """构建MLP层"""
+        """build MLP layers"""
         if nlayers == 1:
             return nn.Linear(in_dim, bottleneck_dim, bias=bias)
         
@@ -82,7 +75,6 @@ class DinoProjection(BaseHead):
         return nn.Sequential(*layers)
     
     def _init_weights(self, m):
-        """权重初始化"""
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=0.02)
             if m.bias is not None:
@@ -91,10 +83,10 @@ class DinoProjection(BaseHead):
     def forward(self, x: torch.Tensor, node_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
-            x: [B, N, D_in] 聚合后特征
-            node_mask: [B, N] 有效节点掩码
+            x: [B, N, D_in] 
+            node_mask: [B, N] 
         Returns:
-            z: [B, N, D_out] 训练用投影特征
+            z: [B, N, D_out] 
         """
         B, N, D = x.shape
         
@@ -104,21 +96,22 @@ class DinoProjection(BaseHead):
         # Reshape for BatchNorm
         x_flat = x.reshape(B * N, D)
         
-        # MLP + 中间L2归一化
+        # MLP + L2 Norm
         x_flat = self.mlp(x_flat)
         eps = 1e-6 if x_flat.dtype == torch.float16 else 1e-12
         x_flat = F.normalize(x_flat, dim=-1, p=2, eps=eps)
         
-        # 权重归一化的最后层
+        # last layer (linear + weight norm)
         z_flat = self.last_layer(x_flat)
         z = z_flat.reshape(B, N, -1)
         
         return z
 
-
+# Code adapted from MocoV3
+# https://github.com/facebookresearch/moco-v3/blob/main/moco/builder.py
 class MoCoProjection(BaseHead):
     """
-    MoCo/SimCLR 风格投影头：多层 MLP + 可选最后层 BN（无仿射）
+    MoCo/SimCLR style projection head: multi-layer MLP + optional last layer BN (no affine)
     """
 
     def __init__(
@@ -145,7 +138,7 @@ class MoCoProjection(BaseHead):
                 mlp.append(nn.BatchNorm1d(dim2))
                 mlp.append(nn.ReLU(inplace=True))
             elif last_bn:
-                # SimCLR设计：最后层BN无仿射参数
+                # SimCLR uses a BatchNorm without affine transformation
                 mlp.append(nn.BatchNorm1d(dim2, affine=False))
 
         return nn.Sequential(*mlp)
@@ -153,10 +146,10 @@ class MoCoProjection(BaseHead):
     def forward(self, x: torch.Tensor, node_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Args:
-            x: [B, N, D_in] 聚合后特征  
-            node_mask: [B, N] 有效节点掩码
+            x: [B, N, D_in]   
+            node_mask: [B, N] 
         Returns:
-            z: [B, N, D_out] 训练用投影特征
+            z: [B, N, D_out] 
         """
         B, N, D = x.shape
         

@@ -7,7 +7,7 @@ from typing import Optional
 
 class ContrastiveHead(nn.Module):
     """
-    对比头：forward(z) -> q_contrast
+    Contrastive Head: forward(z) -> q_contrast
     """
     def __init__(self, in_dim:int, style:str="dino", **kwargs):
         super().__init__()

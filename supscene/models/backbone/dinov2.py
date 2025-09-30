@@ -96,9 +96,8 @@ class DINOv2(nn.Module):
         attn = None
         for i, blk in enumerate(self.model.blocks[self.num_frozen_blocks:]):
             if self.return_attn_maps and i == len(self.model.blocks[self.num_frozen_blocks:]) - 1:
-                # 只在最后一个可训练block获取注意力
                 attn = blk(x, return_attention=True)
-                x = blk(x)  # 正常前向
+                x = blk(x)
             else:
                 x = blk(x)
 
@@ -113,7 +112,7 @@ class DINOv2(nn.Module):
         
         if self.return_attn_maps and attn is not None:
             # Process attention maps
-            cls_to_patch_attn = attn[:, :, 1:, 0]  # 去掉CLS token
+            cls_to_patch_attn = attn[:, :, 1:, 0]  
             patch_h, patch_w = H // 14, W // 14
             attn_maps = cls_to_patch_attn.reshape(B, attn.shape[1], patch_h, patch_w)
             return f, attn_maps
@@ -139,17 +138,17 @@ class DINOv2(nn.Module):
         self._configure_trainable_blocks()
 
 
-if __name__ == "__main__":
-    # Test DINOv2 output dimensions
-    model = DINOv2(model_name='dinov2_vitb14', return_cls_token=True).to("cuda")
-    x = torch.randn(2, 3, 322, 322).to("cuda")
+# if __name__ == "__main__":
+#     # Test DINOv2 output dimensions
+#     model = DINOv2(model_name='dinov2_vitb14', return_cls_token=True).to("cuda")
+#     x = torch.randn(2, 3, 322, 322).to("cuda")
     
-    # Test with CLS token
-    f, t = model(x)
-    print(f"Feature map shape: {f.shape}")  # Should be [2, 768, 16, 16]
-    print(f"CLS token shape: {t.shape}")    # Should be [2, 768]
+#     # Test with CLS token
+#     f, t = model(x)
+#     print(f"Feature map shape: {f.shape}")  # Should be [2, 768, 16, 16]
+#     print(f"CLS token shape: {t.shape}")    # Should be [2, 768]
     
-    # Test without CLS token
-    model.return_cls_token = False
-    f = model(x)
-    print(f"Feature map only shape: {f.shape}")  # Should be [2, 768, 16, 16]
+#     # Test without CLS token
+#     model.return_cls_token = False
+#     f = model(x)
+#     print(f"Feature map only shape: {f.shape}")  # Should be [2, 768, 16, 16]
