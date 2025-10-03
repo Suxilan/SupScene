@@ -226,6 +226,5 @@ data/1dsfm/*
 # Note: if the files inside GL3D are already tracked by git, run:
 #   git rm -r --cached GL3D/*
 # then commit the removal so .gitignore takes effect.
-
-third_party/ConFIG/*
-third_party/dinov2/*
+/third_party/ConFIG
+/third_party/dinov2
