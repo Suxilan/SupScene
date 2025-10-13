@@ -1,2 +1,2 @@
 # SupScene：Learning Overlap-Aware Global Descriptor for Unconstrained SfM
-![SupScene](https://github.com/Suxilan/SupScene/releases/raw/overview/SupScene.webp)
+![SupScene](https://github.com/lzx551402/GL3D/blob/v2/imgs/gl3d_view.png)
