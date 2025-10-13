@@ -1,2 +1,2 @@
 # SupScene：Learning Overlap-Aware Global Descriptor for Unconstrained SfM
-https://github.com/user-attachments/assets/6bdf8b2d-b284-4897-ba77-9bcc1be7cc96
+https://github.com/user-attachments/assets/8ced12af-1fbc-41a0-8539-f958dceb84ca
