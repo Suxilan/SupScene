@@ -75,7 +75,7 @@ def create_trainer(components: Dict[str, Any], config: SupSceneConfig, resume_wa
         device=components["device"],
         output_dir=log_cfg.output_dir,
         root_dir=data_cfg.root_dir,
-        split_txt=data_cfg.val_split_file,
+        val_split=data_cfg.val_split_file,
         metric_pos_th=metric_cfg.metric_pos_th,
         metric_ks=tuple(metric_cfg.metric_ks),
 

@@ -511,7 +511,7 @@ class BaseTrainer(ABC):
             self.global_step += 1
             lr = self.optimizer.param_groups[0]["lr"]
             bar.set_postfix({
-                'Loss': f"{step_metrics.get('loss/total_loss', 0):.4f}",
+                'Loss': f"{step.get('loss/total_loss', 0):.4f}",
                 'LR': f"{lr:.2e}"
             })
             

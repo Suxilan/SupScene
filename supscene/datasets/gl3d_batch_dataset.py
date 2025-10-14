@@ -1,5 +1,5 @@
 import os
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import torch
 from torch.utils.data import Dataset
 import cv2

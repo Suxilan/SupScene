@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
+from tqdm import tqdm
 
 # --- 依赖你已有的数据工具 ---
 from .datasets.gl3d_subgraph_dataset import read_lines
@@ -132,7 +133,7 @@ class SupSceneEvaluator:
         if self.is_main_process:
             print(f"[Eval] Extracting features for {len(ds)} images…")
 
-        for batch in dl:
+        for batch in tqdm(dl, desc="Extracting features", disable=not self.is_main_process):
             if isinstance(batch, (list, tuple)) and len(batch) == 2:
                 x, idx = batch
             else:  # backward compatibility (dataset returning only images)
@@ -224,7 +225,7 @@ class SupSceneEvaluator:
                 "metrics": metrics}
 
     @torch.no_grad()
-    def evaluate_global_efficient(
+    def _global_eval(
         self,
         all_emb: torch.Tensor,
         scene_O: List[torch.Tensor],

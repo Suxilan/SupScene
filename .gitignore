@@ -226,5 +226,14 @@ data/1dsfm/*
 # Note: if the files inside GL3D are already tracked by git, run:
 #   git rm -r --cached GL3D/*
 # then commit the removal so .gitignore takes effect.
-/third_party/ConFIG
-/third_party/dinov2
+# ignore everything in third_party except the .gitkeep placeholder
+/third_party/*
+
+# experiments: ignore all generated/runtime files under experiments/ except
+# keep YAML config files and any config.json files (may be at any depth).
+experiments/**
+!/experiments/**/
+#! allow common config filenames anywhere under experiments
+!experiments/**/config.json
+!experiments/**/config.yaml
+experiments/**/wandb/*

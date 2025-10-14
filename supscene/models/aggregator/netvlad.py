@@ -32,9 +32,9 @@ class NetVLAD(nn.Module):
         self.assign = nn.Conv2d(in_dim, K, kernel_size=1, bias=False)
 
         # Cluster centers
-        self.centers = nn.Parameter(torch.empty(K, in_dim))
+        self.centers = nn.Parameter(torch.rand(K, in_dim))
 
-        self.bn = nn.BatchNorm1d(K * in_dim) if add_batch_norm else None
+        self.bn = nn.BatchNorm1d(K * in_dim)
 
         # K‑means init placeholders
         self.clsts = None
@@ -46,7 +46,7 @@ class NetVLAD(nn.Module):
         nn.init.xavier_uniform_(self.centers)
         nn.init.xavier_uniform_(self.assign.weight)
         with torch.no_grad():
-            self.assign.weight.mul_(self.alpha)
+            self.assign.weight.data *= self.alpha
 
     def init_from_clusters(self, clsts, traindescs) -> None:
         """Init with k‑means results.
@@ -94,11 +94,11 @@ class NetVLAD(nn.Module):
         # Flatten
         Hh, Ww = x.shape[-2:]
         N = Hh * Ww
-        x_nC = x.view(B, C, N).transpose(1, 2)  # (B,N,C)
+        x_nC = x.view(B, C, N)                  # (B,C,N)
         a_kn = a.view(B, self.K, N)             # (B,K,N)
 
         # Aggregation
-        v_x = torch.einsum("bkn,bnc->bkc", a_kn, x_nC)  # Σ_n a·x
+        v_x = torch.einsum("bkn,bcn->bkc", a_kn, x_nC)  # Σ_n a·x
         a_sum = a_kn.sum(-1, keepdim=True)               # Σ_n a
         v_kc = v_x - a_sum * self.centers.unsqueeze(0)   # residuals
         

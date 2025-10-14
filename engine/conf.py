@@ -17,14 +17,14 @@ from utils import printf
 @dataclass
 class DataConfig:
     root_dir: str = "data"
-    split_file: str = "data/dataset_split/gl3d/train.txt"
-    val_split_file: str = "data/dataset_split/gl3d/val.txt"
+    split_file: str = "data/dataset_split/train.txt"
+    val_split_file: str = "data/dataset_split/val.txt"
     n_sub: int = 128
     sampler_mode: str = "anchor_expand"  # anchor_expand, random, density
     iou_thresh: float = 0.2
     topk_per_hop: int = 64
     load_images: bool = True
-    image_size: int = 224
+    image_size: int = 322
     scenes_per_epoch: Optional[int] = None  # None=all scenes
     samples_per_scene: Optional[int] = None  # None=adaptive based on scene size
     teacher_name: Optional[str] = None
@@ -44,12 +44,12 @@ class ModelConfig:
         "args": {
             "model_name": "dinov2_vitb14", 
             "num_trainable_blocks": 1, 
-            "return_cls_token": False,
-            "return_attn_maps": True
+            "return_cls_token": True,
+            "return_attn_maps": False
         }})
     
     aggregator: Dict[str, Any] = field(default_factory=lambda: {
-        "name": "attn3d", 
+        "name": "salad", 
         "args": {}
     })
     
@@ -61,7 +61,7 @@ class ModelConfig:
     weights: Dict[str, Any] = field(default_factory=lambda:None)
     
     # EMA
-    use_ema: bool = True
+    use_ema: bool = False
     ema_decay: float = 0.999
     ema_use_num_updates: bool = True
     
@@ -78,47 +78,47 @@ class HeadConfig:
         }
     })
 
-    distill_head: Dict[str, Any] = field(default_factory=lambda: {
-        "type": "DistillHead",
-        "params": {
-            "style": "moco",
-            "out_dim": 256,
-            "hidden_dim": 2048,
-            "nlayers": 3,
-            "last_bn": False
-        }
-    })
+    # distill_head: Dict[str, Any] = field(default_factory=lambda: {
+    #     "type": "DistillHead",
+    #     "params": {
+    #         "style": "moco",
+    #         "out_dim": 256,
+    #         "hidden_dim": 2048,
+    #         "nlayers": 3,
+    #         "last_bn": False
+    #     }
+    # })
 
-    cluster_head: Dict[str, Any] = field(default_factory=lambda: {
-        "type": "SimpleClusterHead",
-        "params": {
-            "K": 64,
-            "hidden": 512,
-            "dropout": 0.1,
-            "tau": 0.07,
-            "learnable_tau": False,
-            "num_layers": 2,
-            "bias": True,
-        }
-    })
+    # cluster_head: Dict[str, Any] = field(default_factory=lambda: {
+    #     "type": "SimpleClusterHead",
+    #     "params": {
+    #         "K": 64,
+    #         "hidden": 512,
+    #         "dropout": 0.1,
+    #         "tau": 0.07,
+    #         "learnable_tau": False,
+    #         "num_layers": 2,
+    #         "bias": True,
+    #     }
+    # })
 
-    overlap_head: Dict[str, Any] = field(default_factory=lambda: {
-        "type": "OverlapPredictorHead",
-        "params": {
-            "use_bias": True,
-            "apply_sigmoid": True
-        }
-    })
+    # overlap_head: Dict[str, Any] = field(default_factory=lambda: {
+    #     "type": "OverlapPredictorHead",
+    #     "params": {
+    #         "use_bias": True,
+    #         "apply_sigmoid": True
+    #     }
+    # })
 
 @dataclass
 class LossConfig:
     contrast_loss: Dict[str, Any] = field(default_factory=lambda: {
         "type": "SupConLoss",
         "params": {
-            "temperature": 0.1,
+            "tau": 0.1,
             "mode": "soft",          # "soft" or "hard"
             "gamma": 0.7,
-            "pos_threshold": 0.25,
+            "pos_th": 0.25,
             "exclude_self": True,
             "eps": 1e-8
         }
@@ -127,7 +127,7 @@ class LossConfig:
         "type": "DistillLoss",
         "params": {
             "distill_type": "relation",   # "relation" | "cosine" | "mse" | "kl"
-            "temperature": 4.0
+            "tau": 4.0
         }
     })
     # huber_loss: Dict[str, Any] = field(default_factory=lambda: {
@@ -166,7 +166,7 @@ class OptimConfig:
     warmup_start_factor: float = 0.01
     eta_min: float = 1e-7   # args
     
-    epochs: int = 100
+    epochs: int = 50
     grad_clip: float = 1.0
     accumulate_grad_batches: int = 1
     
@@ -174,15 +174,15 @@ class OptimConfig:
 
 @dataclass
 class LogConfig:
-    output_dir: str = "experiments/gem"
+    output_dir: str = "experiments/salad"
     log_interval: int = 10
     eval_interval: int = 1
-    save_interval: int = 10
-    eval_per_epochs: int = 10
+    save_interval: int = 1
+    eval_per_epochs: int = 1
     
     log_with: str = "wandb"  # wandb, tensorboard, None
     wandb_project: str = "SupScene"
-    wandb_name: Optional[str] = "GeM"
+    wandb_name: Optional[str] = "SALAD"
     wandb_config: Dict[str, Any] = field(default_factory=dict)
     
     eval_on_start: bool = True
@@ -192,7 +192,7 @@ class LogConfig:
 @dataclass
 class MetricConfig:
     metric_pos_th: float = 0.25
-    metric_ks: List[int] = field(default_factory=lambda: [1, 10, 25, 50])
+    metric_ks: List[int] = field(default_factory=lambda: [1, 25, 50, 100])
 
 @dataclass
 class SystemConfig:
@@ -202,7 +202,6 @@ class SystemConfig:
     seed: int = 42
     deterministic: bool = True
     device_specific: bool = False
-
 
 @dataclass
 class SupSceneConfig:
@@ -353,7 +352,7 @@ if __name__ == "__main__":
     printf("✅ default config saved to: configs/default.yaml")
 
     loaded_config = SupSceneConfig.from_yaml("configs/default.yaml")
-    printf("✅ successfully loaded config from YAML: %s", loaded_config)
+    printf(f"✅ successfully loaded config from YAML")
     
     import sys
     sys.argv = ['config.py', '--lr', '2e-4', '--epochs', '50']

@@ -20,7 +20,7 @@ class SupConLoss(nn.Module):
     def __init__(self, 
                  tau=0.1,
                  mode="soft",           # "soft" | "hard"
-                 gamma=0.8,           
+                 gamma=0.7,           
                  pos_th=0.3,           # Positive threshold
                  exclude_self=True,    
                  eps=1e-8):
@@ -33,12 +33,29 @@ class SupConLoss(nn.Module):
         self.exclude_self = exclude_self
         self.eps = float(eps)
 
+    def _pack_blockdiag(self, o, pair_mask):
+        B, N, _ = o.shape
+        device, dtype = o.device, o.dtype
+
+        BN = B * N
+        o_full = torch.zeros((1, BN, BN), dtype=dtype, device=device)
+        pair_mask_full = torch.ones((1, BN, BN), dtype=torch.bool, device=device)
+
+        for b in range(B):
+            i0, i1 = b * N, (b + 1) * N
+            o_full[:, i0:i1, i0:i1] = o[b:b+1]
+            pair_mask_full[:, i0:i1, i0:i1] = pair_mask[b:b+1]
+
+        return o_full, pair_mask_full  # (1, BN, BN)
+
     def _logsumexp(self, x, keep_mask=None, add_one=True, dim=1):
         """Masked logsumexp for numerical stability"""
         if keep_mask is not None:
             x = x.masked_fill(~keep_mask, float('-inf'))
         if add_one:
-            zeros = torch.zeros(x.size(dim - 1), dtype=x.dtype, device=x.device).unsqueeze(dim)
+            shape = list(x.shape)
+            shape[dim] = 1
+            zeros = torch.zeros(shape, dtype=x.dtype, device=x.device)
             x = torch.cat([x, zeros], dim=dim)
         out = torch.logsumexp(x, dim=dim, keepdim=True)
         if keep_mask is not None:
@@ -97,7 +114,8 @@ class SupConLoss(nn.Module):
     def forward(self, 
                 x,      
                 o, 
-                pair_mask):
+                pair_mask,
+                accelerator=None,):
         """Forward pass
         Args:
             x: Feature tensor of shape (B, N, D)
@@ -108,9 +126,55 @@ class SupConLoss(nn.Module):
         """
         # Normalize and compute similarity
         x = F.normalize(x, p=2, dim=-1, eps=1e-6)
-        s = torch.bmm(x, x.transpose(1, 2))
-        final_mask = pair_mask.bool()
-        return self._compute_loss(s, o, final_mask)
+        B, N, D = x.shape
+        if accelerator is not None and accelerator.num_processes > 1:
+            x_flat = x.reshape(B * N, D)                 # (BN_local, D)
+            BN_local = x_flat.size(0)
+            device = x.device
+
+            rank = accelerator.process_index
+            world = accelerator.num_processes
+
+            local_len = torch.tensor([BN_local], device=device)
+            all_len = accelerator.gather(local_len).tolist()   # [len_0, ..., len_{w-1}]
+            max_len = int(max(all_len))
+            BN_all = int(sum(all_len))
+
+            pad_len = max_len - BN_local
+            if pad_len > 0:
+                x_pad_local = torch.cat([x_flat, x_flat.new_zeros(pad_len, D)], dim=0)  # (max_len, D)
+            else:
+                x_pad_local = x_flat
+
+            x_gather_det = accelerator.gather(x_pad_local.detach()) 
+            x_gather = x_gather_det.clone()
+            start = rank * max_len
+            x_gather[start : start + BN_local] = x_flat              
+
+            keep = torch.zeros(world * max_len, dtype=torch.bool, device=device)
+            for r, L in enumerate(all_len):
+                if L > 0:
+                    keep[r * max_len : r * max_len + int(L)] = True
+            x_all = x_gather[keep]                                       # (BN_all, D)
+
+            offsets = [0]
+            for L in all_len[:-1]:
+                offsets.append(offsets[-1] + int(L))
+            offset = offsets[rank]
+
+            o_blk, m_blk = self._pack_blockdiag(o, pair_mask)            # (1,BN_local,BN_local)
+            o_full = torch.zeros((1, BN_all, BN_all), dtype=o.dtype, device=device)
+            m_full = torch.ones((1, BN_all, BN_all), dtype=torch.bool, device=device)
+            o_full[:, offset:offset+BN_local, offset:offset+BN_local] = o_blk
+            m_full[:, offset:offset+BN_local, offset:offset+BN_local] = m_blk
+
+            s_full = (x_all @ x_all.t()).unsqueeze(0)                    # (1, BN_all, BN_all)
+            return self._compute_loss(s_full, o_full, m_full)
+
+        else:
+            s = torch.bmm(x, x.transpose(1, 2))      # (B, N, N)
+            final_mask = pair_mask.bool()
+            return self._compute_loss(s, o, final_mask)
 
 
 # class InfoNCELoss(nn.Module):

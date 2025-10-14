@@ -2,7 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Any, Optional
 from itertools import chain
-
+from accelerate import Accelerator
 import torch
 import torch.nn as nn
 from utils import printf
@@ -60,16 +60,17 @@ class TaskManager:
             head_params = cfg.get('params', {})
             
             if head_type == 'SimpleClusterHead':
-                heads[head_name] = SimpleClusterHead(
-                    in_dim=self.in_dim, 
-                    K=head_params.get('K', 64), 
-                    hidden=head_params.get('hidden', 512), 
-                    dropout=head_params.get('dropout', 0.1),
-                    tau=head_params.get('tau', 0.07), 
-                    learnable_tau=head_params.get('learnable_tau', False), 
-                    num_layers=head_params.get('num_layers', 2), 
-                    bias=head_params.get('bias', True)
-                )
+                raise NotImplementedError("SimpleClusterHead is not implemented in this version.")
+                # heads[head_name] = SimpleClusterHead(
+                #     in_dim=self.in_dim, 
+                #     K=head_params.get('K', 64), 
+                #     hidden=head_params.get('hidden', 512), 
+                #     dropout=head_params.get('dropout', 0.1),
+                #     tau=head_params.get('tau', 0.07), 
+                #     learnable_tau=head_params.get('learnable_tau', False), 
+                #     num_layers=head_params.get('num_layers', 2), 
+                #     bias=head_params.get('bias', True)
+                # )
             elif head_type == 'DistillHead':
                 # Remove style from kwargs before passing to projection
                 projection_kwargs = {k: v for k, v in head_params.items() if k != 'style'}
@@ -85,11 +86,12 @@ class TaskManager:
                     style=head_params.get('style', 'moco'), 
                     **projection_kwargs)
             elif head_type == 'OverlapPredictorHead':
-                heads[head_name] = OverlapPredictorHead(
-                    in_dim=self.in_dim, 
-                    use_bias=head_params.get('use_bias', True),
-                    apply_sigmoid=head_params.get('apply_sigmoid', True)
-                )
+                raise NotImplementedError("OverlapPredictorHead is not implemented in this version.")
+                # heads[head_name] = OverlapPredictorHead(
+                #     in_dim=self.in_dim, 
+                #     use_bias=head_params.get('use_bias', True),
+                #     apply_sigmoid=head_params.get('apply_sigmoid', True)
+                # )
             else:
                 raise ValueError(f"Unknown head type: {head_type}")
         
@@ -106,17 +108,17 @@ class TaskManager:
             
             if loss_type == 'SupConLoss':
                 losses[loss_name] = SupConLoss(
-                    temperature=loss_params.get('temperature', 0.1),
+                    tau=loss_params.get('tau', 0.1),
                     mode=loss_params.get('mode', 'soft'),
                     gamma=loss_params.get('gamma', 0.1),
-                    pos_threshold=loss_params.get('pos_threshold', 0.25),
+                    pos_th=loss_params.get('pos_th', 0.25),
                     exclude_self=loss_params.get('exclude_self', True),
                     eps=loss_params.get('eps', 1e-8),
                 )
             elif loss_type == 'DistillLoss':
                 losses[loss_name] = DistillLoss(
                     distill_type=loss_params.get('distill_type', 'relation'),
-                    temperature=loss_params.get('temperature', 4.0),
+                    tau=loss_params.get('tau', 4.0),
                 )
             else:
                 raise ValueError(f"Unknown loss type: {loss_type}")
@@ -176,6 +178,7 @@ class TaskManager:
                      pair_mask: torch.Tensor,
                      node_mask: torch.Tensor,
                      teacher_features: torch.Tensor,
+                     accelerator: Optional[Accelerator] = None
                      ) -> torch.Tensor:
         """Compute the total loss for all enabled tasks."""
         
@@ -194,7 +197,7 @@ class TaskManager:
                 # Compute the appropriate loss for each task
                 if task_cfg.name == "contrast":
                     # contrastive loss
-                    loss = loss_fn(task_out, overlap, pair_mask)
+                    loss = loss_fn(task_out, overlap, pair_mask, accelerator)
                 elif task_cfg.name == "distill":
                     # distillation loss
                     loss = loss_fn(task_out, teacher_features, pair_mask, node_mask)
@@ -280,10 +283,10 @@ loss_cfgs = {
     "contrast_loss": {
         "type": "SupConLoss",
         "params": {
-            "temperature": 0.1,
+            "tau": 0.1,
             "mode": "soft",          # "soft" or "hard"
             "gamma": 0.8,
-            "pos_threshold": 0.25,
+            "pos_th": 0.25,
             "exclude_self": True,
             "eps": 1e-8
         }
@@ -292,7 +295,7 @@ loss_cfgs = {
         "type": "DistillLoss",
         "params": {
             "distill_type": "relation",   # "relation" | "cosine" | "mse" | "kl"
-            "temperature": 4.0
+            "tau": 4.0
         }
     },
     # "huber_loss": {
@@ -302,7 +305,7 @@ loss_cfgs = {
     #         "weight_mode": "overlap",   # "none" | "posneg" | "overlap"
     #         "pos_weight": 2.0,
     #         "neg_weight": 1.5,
-    #         "pos_threshold": 0.25,
+    #         "pos_th": 0.25,
     #         "gamma": 0.7
     #     }
     # },

@@ -44,7 +44,7 @@ def build_dataset(config: SupSceneConfig, split: str = "train") -> GL3DSubgraphD
 
     sampler = SubgraphSampler(
         mode=data_cfg.sampler_mode,
-        iou_thresh=data_cfg.iou_thresh,
+        iou_th=data_cfg.iou_thresh,
         topk_per_hop=data_cfg.topk_per_hop,
     )
 
@@ -119,9 +119,9 @@ def build_task_manager(config: SupSceneConfig, in_dim: int) -> TaskManager:
 
     task_cfgs = [
         TaskConfig(name="contrast", enabled=task_cfg.contrast_enabled, head_name="contrast_head", loss_name="contrast_loss", loss_weight=task_cfg.contrast_weight),
-        TaskConfig(name="huber", enabled=task_cfg.huber_enabled, head_name="overlap_head", loss_name="huber_loss", loss_weight=task_cfg.huber_weight),
-        TaskConfig(name="lowrank", enabled=task_cfg.lowrank_enabled, head_name="cluster_head", loss_name="lowrank_loss", loss_weight=task_cfg.lowrank_weight),
-        TaskConfig(name="distill", enabled=task_cfg.distill_enabled, head_name="distill_head", loss_name="distill_loss", loss_weight=task_cfg.distill_weight),
+        # TaskConfig(name="huber", enabled=task_cfg.huber_enabled, head_name="overlap_head", loss_name="huber_loss", loss_weight=task_cfg.huber_weight),
+        # TaskConfig(name="lowrank", enabled=task_cfg.lowrank_enabled, head_name="cluster_head", loss_name="lowrank_loss", loss_weight=task_cfg.lowrank_weight),
+        # TaskConfig(name="distill", enabled=task_cfg.distill_enabled, head_name="distill_head", loss_name="distill_loss", loss_weight=task_cfg.distill_weight),
     ]
 
     tm = TaskManager(
@@ -243,7 +243,7 @@ def build_all_components(config: SupSceneConfig) -> Dict[str, Any]:
     model = build_model(config)
     total, trainable = count_params(model)
     printf(f"Params — total: {total/1e6:.3f}M, trainable: {trainable/1e6:.3f}M")
-    in_dim = _infer_out_dim(model)
+    in_dim = model.output_dim
 
     # tasks
     printf("🎯 Building task manager…")

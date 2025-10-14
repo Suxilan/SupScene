@@ -1,0 +1,108 @@
+data:
+  batch_size: 2
+  diag_weight: 0.1
+  image_size: 322
+  iou_thresh: 0.2
+  load_images: true
+  n_sub: 128
+  num_workers: 8
+  pin_memory: true
+  root_dir: data
+  sampler_mode: anchor_expand
+  samples_per_scene: null
+  scenes_per_epoch: null
+  shuffle: true
+  split_file: data/dataset_split/train.txt
+  teacher_name: null
+  topk_per_hop: 64
+  val_split_file: data/dataset_split/val.txt
+head:
+  contrast_head:
+    params:
+      hidden_dim: 2048
+      last_bn: false
+      nlayers: 2
+      out_dim: 256
+      style: moco
+    type: ContrastiveHead
+log:
+  eval_interval: 1
+  eval_on_start: true
+  eval_per_epochs: 1
+  log_interval: 10
+  log_with: wandb
+  monitor_metric: metric/recall@25
+  monitor_mode: max
+  output_dir: experiments/netvlad
+  save_interval: 1
+  wandb_config: {}
+  wandb_name: NetVLAD
+  wandb_project: SupScene
+loss:
+  contrast_loss:
+    params:
+      eps: 1.0e-08
+      exclude_self: true
+      gamma: 0.7
+      mode: soft
+      pos_th: 0.25
+      tau: 0.1
+    type: SupConLoss
+  distill_loss:
+    params:
+      distill_type: relation
+      tau: 4.0
+    type: DistillLoss
+metric:
+  metric_ks:
+  - 1
+  - 25
+  - 50
+  - 100
+  metric_pos_th: 0.25
+model:
+  aggregator:
+    args: {}
+    name: netvlad
+  backbone:
+    args:
+      model_name: dinov2_vitb14
+      num_trainable_blocks: 1
+      return_attn_maps: false
+      return_cls_token: false
+    name: dinov2
+  deploy_head:
+    args: {}
+    name: deploy_head
+  ema_decay: 0.999
+  ema_use_num_updates: true
+  use_ema: false
+  weights: null
+optim:
+  accumulate_grad_batches: 1
+  epochs: 50
+  eta_min: 1.0e-07
+  grad_clip: 1.0
+  lr: 0.0001
+  optimizer: adamw
+  scheduler: cosine
+  use_conflictfree: false
+  warmup_pct: 0.1
+  warmup_start_factor: 0.01
+  weight_decay: 0.01
+system:
+  deterministic: true
+  device: cuda
+  device_specific: false
+  mixed_precision: 'no'
+  seed: 42
+  use_accelerate: true
+task:
+  contrast_enabled: true
+  contrast_weight: 1.0
+  distill_enabled: false
+  distill_weight: 5.0
+  huber_enabled: false
+  huber_weight: 0.5
+  lowrank_enabled: false
+  lowrank_weight: 0.2

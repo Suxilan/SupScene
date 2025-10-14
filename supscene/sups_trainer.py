@@ -35,7 +35,7 @@ class SupSceneTrainer(BaseTrainer):
         optimizer: Torch optimizer.
         task_manager (TaskManager): Provides task heads & loss aggregation.
         root_dir (str): Dataset root for evaluation.
-        split_txt (str): Split file for evaluation.
+        val_split (str): Split file for evaluation.
         metric_pos_th (float): Positive threshold for retrieval metrics.
         metric_ks (tuple): Recall@K list.
         use_conflictfree (bool): Enable ConFIG if available.
@@ -47,14 +47,14 @@ class SupSceneTrainer(BaseTrainer):
         optimizer,
         task_manager: TaskManager,
         root_dir: str,
-        split_txt: str,
+        val_split: str,
         metric_pos_th: float = 0.3,
         metric_ks: tuple = (1, 5, 10),
         use_conflictfree: bool = False,
         **kwargs,
     ):
         self.root_dir = root_dir
-        self.split_txt = split_txt
+        self.val_split = val_split
         self.metric_pos_th: float = metric_pos_th
         self.metric_ks: tuple = metric_ks
         super().__init__(model, optimizer, **kwargs)
@@ -171,6 +171,7 @@ class SupSceneTrainer(BaseTrainer):
             pair_mask=pair_mask,
             node_mask=node_mask,
             teacher_features=teacher_features,
+            accelerator=self.accelerator if self.use_accelerate else None,
         )
         return losses
 
@@ -469,7 +470,7 @@ class SupSceneTrainer(BaseTrainer):
         """Run full evaluation on GL3D split."""
         cfg = EvalConfig(
             root_dir=self.root_dir,
-            split_txt=self.split_txt,
+            split_txt=self.val_split,
             img_size=322,
             batch_size=64,
             num_workers=4,
@@ -478,6 +479,8 @@ class SupSceneTrainer(BaseTrainer):
             ks=self.metric_ks,
             save_embeds=False,
             global_retrieval=True,
+            use_accelerate=self.use_accelerate,
+            accelerator=self.accelerator,
         )
         self.model.eval()
         use_ema_for_eval = False  # switchable flag
@@ -582,9 +585,9 @@ class SupSceneTrainer(BaseTrainer):
                 data["original_images"], data["attention_maps"], alpha=0.5, colormap_name="magma"
             )
             if heat is not None:
-                vis = {f"gap_heatmap_{i}": heat[i] for i in range(heat.shape[0])}
+                vis = {f"heatmap_{i}": heat[i] for i in range(heat.shape[0])}
                 self._log_image(vis, self.global_step, prefix)
-                self.logger.info(f"GAP visualization logged — epoch {epoch}")
+                self.logger.info(f"Visualization logged — epoch {epoch}")
         except Exception as e:
             self.logger.warning(f"Visualization error: {e}")
 
