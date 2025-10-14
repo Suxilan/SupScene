@@ -164,7 +164,7 @@ If you find **SupScene** useful, please cite:
 
 ## 📫 Contact
 
-* Maintainer: Suxilan (shixulei@whu.edu.cn)
+* Maintainer: *(to be added)*
 * Project page: *(to be added)*
 
 ---
