@@ -1,0 +1,6 @@
+[submodule "third_party/dinov2"]
+path = third_party/dinov2
+url = https://github.com/facebookresearch/dinov2
+[submodule "third_party/ConFIG"]
+path = third_party/ConFIG
+url = https://github.com/tum-pbs/ConFIG
