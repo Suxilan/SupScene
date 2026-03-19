@@ -1,7 +1,21 @@
-from .taskmanager import TaskManager, TaskConfig
 from .encoder import SupSceneEncoder, create_encoder
-from .eval import SupSceneEvaluator, EvalConfig
-from .sups_trainer import SupSceneTrainer
+
+try:
+    from .taskmanager import TaskManager, TaskConfig
+except Exception:
+    TaskManager = None
+    TaskConfig = None
+
+try:
+    from .eval import SupSceneEvaluator, EvalConfig
+except Exception:
+    SupSceneEvaluator = None
+    EvalConfig = None
+
+try:
+    from .sups_trainer import SupSceneTrainer
+except Exception:
+    SupSceneTrainer = None
 
 __all__ = [
     "SupSceneEncoder",

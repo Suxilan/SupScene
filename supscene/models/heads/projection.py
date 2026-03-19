@@ -23,7 +23,7 @@ def trunc_normal_(tensor, mean=0.0, std=1.0, a: float = -2.0, b: float = 2.0):
         tensor.clamp_(min=a, max=b)
         return tensor
 
-# Code adapted from SALAD, Apache 2.0 license
+# Code adapted from DINOv2 head implementations
 # https://github.com/facebookresearch/dinov2/blob/main/dinov2/layers/dino_head.py
 class DinoProjection(BaseHead):
     """

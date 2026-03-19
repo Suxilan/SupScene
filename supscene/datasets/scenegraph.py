@@ -1,5 +1,6 @@
 import os
-from typing import List, Optional
+import json
+from typing import List, Optional, Tuple
 import numpy as np
 from dataclasses import dataclass
 
@@ -35,53 +36,43 @@ class SceneGraph:
     """Load per-scene graph: image list + sparse overlap matrix (COO).
 
     Notes:
-        - Keeps original I/O structure; logic unchanged.
-        - Accepts either images.txt or overlaps.npz["filenames"].
+        - Supports gt.npz/overlap.npz using rows/cols/vals or legacy row/col/val names.
+        - Reads the image order from images.txt, image_index.json, or npz metadata.
     """
 
     def __init__(self, scene_dir: str, teacher_name: str = "dinov2_g14_cls"):
         self.scene_dir = scene_dir
         self.images_dir = os.path.join(scene_dir, "images")
         self.images_txt = os.path.join(scene_dir, "images.txt")
-        self.overlaps_npz = os.path.join(scene_dir, "overlaps.npz")
+        self.image_index_file = os.path.join(scene_dir, "image_index.json")
+        self.gt_npz = self._find_gt()
+        # teacher fields (preserve original public API)
         self.teacher_dir = os.path.join(scene_dir, "teacher_embs")
         self.teacher_name = teacher_name
         self.teacher_npy = os.path.join(self.teacher_dir, f"{teacher_name}.npy")
 
-        # 1) read image order
-        if os.path.exists(self.images_txt):
-            image_names = read_lines(self.images_txt)
-        else:
-            # if images.txt missing, try filenames field in overlaps.npz
-            with np.load(self.overlaps_npz, allow_pickle=True) as coo:
-                if "filenames" not in coo:
-                    raise FileNotFoundError(f"images.txt missing and overlaps.npz lacks 'filenames': {self.overlaps_npz}")
-                image_names = list(map(str, coo["filenames"]))
+        # Load metadata and sparse overlap matrix
+        with np.load(self.gt_npz, allow_pickle=True) as data:
+            # 1. Image names / order
+            self.image_names = self._load_image_names(data)
+            self.image_paths = [os.path.join(self.images_dir, nm) for nm in self.image_names]
+            self.N = len(self.image_names)
 
-        self.N = len(image_names)
-        self.image_paths = [os.path.join(self.images_dir, nm) for nm in image_names]
+            # 2. Load sparse matrix (COO)
+            row = self._read_npz_field(data, ["row", "rows"], np.int64)
+            col = self._read_npz_field(data, ["col", "cols"], np.int64)
+            val = self._read_npz_field(data, ["weight", "val", "vals"], np.float32)
 
-        # 2) read sparse overlaps (keys: row, col, weight or val)
-        with np.load(self.overlaps_npz, allow_pickle=True) as coo:
-            row = coo["row"].astype(np.int64)
-            col = coo["col"].astype(np.int64)
-            if "weight" in coo:
-                val = coo["weight"].astype(np.float32)
-            elif "val" in coo:
-                val = coo["val"].astype(np.float32)
-            else:
-                raise KeyError(f"overlaps.npz missing 'weight'/'val' key: {self.overlaps_npz}")
+        # 3. Symmetrize and clean
+        rows = np.concatenate([row, col])
+        cols = np.concatenate([col, row])
+        vals = np.concatenate([val, val])
+        mask = rows != cols
+        self.row = rows[mask].astype(np.int64)
+        self.col = cols[mask].astype(np.int64)
+        self.val = np.clip(vals[mask].astype(np.float32), 0.0, 1.0)
 
-        # symmetrize (safe if already symmetric) and remove self-loops
-        row_sym = np.concatenate([row, col])
-        col_sym = np.concatenate([col, row])
-        val_sym = np.concatenate([val, val])
-        keep = row_sym != col_sym
-        self.row = row_sym[keep]
-        self.col = col_sym[keep]
-        self.val = np.clip(val_sym[keep], 0.0, 1.0)
-
-        # 3) Teacher features (optional, memory-mapped)
+        # 4) Teacher features (optional, memory-mapped) — preserve original behavior
         self.teacher: Optional[np.ndarray] = None
         if os.path.exists(self.teacher_npy):
             arr = np.load(self.teacher_npy, mmap_mode="r")
@@ -93,6 +84,58 @@ class SceneGraph:
             assert (
                 self.teacher.shape[0] == self.N
             ), f"Teacher feat count {self.teacher.shape[0]} != image count {self.N}"
+
+    def _find_gt(self) -> str:
+        # prefer gt.npz, but accept overlaps.npz or overlap.npz for backward compatibility
+        candidates = ["gt.npz", "overlaps.npz", "overlap.npz"]
+        for fn in candidates:
+            path = os.path.join(self.scene_dir, fn)
+            if os.path.exists(path):
+                return path
+        raise FileNotFoundError(f"missing gt/overlaps npz in {self.scene_dir}; tried: {candidates}")
+
+    def _read_npz_field(self, data, candidates: List[str], dtype) -> np.ndarray:
+        for key in candidates:
+            if key in data:
+                return data[key].astype(dtype)
+        # fallback heuristic: any 1D numeric array
+        for k in data.files:
+            arr = data[k]
+            if isinstance(arr, np.ndarray) and arr.ndim == 1:
+                try:
+                    return arr.astype(dtype)
+                except Exception:
+                    continue
+        raise KeyError(f"Missing fields {candidates} in {self.gt_npz}")
+
+    def _load_image_names(self, npz_data) -> List[str]:
+        # Strategy 1: images.txt
+        if os.path.exists(self.images_txt):
+            return read_lines(self.images_txt)
+
+        # Strategy 2: image_index.json
+        if os.path.exists(self.image_index_file):
+            with open(self.image_index_file, "r", encoding="utf-8") as f:
+                index = json.load(f)
+            if isinstance(index, list):
+                return [str(x) for x in index]
+            if isinstance(index, dict):
+                if "id_to_name" in index:
+                    return [str(x) for x in index["id_to_name"]]
+                if "name_to_id" in index:
+                    items = sorted(index["name_to_id"].items(), key=lambda x: int(x[1]))
+                    return [str(k) for k, _ in items]
+
+        # Strategy 3: embedded in NPZ
+        for key in ["images", "filenames"]:
+            if key in npz_data:
+                return [str(x) for x in npz_data[key]]
+
+        # Strategy 4: directory listing fallback
+        if os.path.exists(self.images_dir):
+            return sorted([x for x in os.listdir(self.images_dir) if x.lower().endswith(('.jpg', '.png'))])
+
+        raise FileNotFoundError(f"Could not determine image order in {self.scene_dir}")
 
     def dense_overlap(self, idx: np.ndarray, add_self: bool = True) -> np.ndarray:
         """Extract dense subgraph overlaps.
@@ -136,3 +179,18 @@ class SceneGraph:
         for u, v in zip(self.row[sel], self.col[sel]):
             adj[u].append(v)
         return adj
+
+    def fetch_nodes(self, idx: int) -> Tuple[np.ndarray, np.ndarray]:
+        """Fetch all nodes and their overlap weights with node idx.
+
+        Returns:
+            all_nodes: array of node indices excluding `idx` (shape [N-1])
+            weights: array of overlap weights for each node in `all_nodes` (shape [N-1])
+        """
+        mask = self.row == idx
+        ov_map = {int(n): float(w) for n, w in zip(self.col[mask], self.val[mask])}
+
+        all_nodes = np.delete(np.arange(self.N, dtype=np.int64), idx)
+        weights = np.array([ov_map.get(int(n), 0.0) for n in all_nodes], dtype=np.float32)
+
+        return all_nodes, weights

@@ -8,11 +8,11 @@ import torch.nn.functional as F
 # ====== import your modules ======
 # backbone
 from .models import (
-    DINOv2
+    DINOv2, ResNet
 )
 # aggregator
 from .models import (
-    NetVLAD, GeMPool, SALAD, DiVLAD
+    NetVLAD, GeMPool, SCPP
 )
 # heads
 from .models import DeployHead
@@ -67,6 +67,8 @@ def build_backbone(cfg: Dict[str, Any]) -> nn.Module:
     args = cfg.get("args", {}) or {}
     if name in ("dinov2", "dino", "dinov2_vit"):
         bb = DINOv2(**args)
+    elif name in ("resnet", "ResNet"):
+        bb = ResNet(**args)
     else:
         raise ValueError(f"Unknown backbone: {name}")
     
@@ -93,10 +95,8 @@ def build_aggregator(cfg: Optional[Dict[str, Any]]) -> Optional[nn.Module]:
         agg = NetVLAD(**args)
     elif name in ("gem", "gempool", "gem_pool"):
         agg = GeMPool(**args)
-    elif name in ("salad"):
-        agg = SALAD(**args)
-    elif name in ("divlad"):
-        agg = DiVLAD(**args)
+    elif name in ("scpp"):
+        agg = SCPP(**args)
     elif name in ("avg", "avgpool"):
         agg = GlobalAvgPool(**args)
     elif name in ("cls", "clstoken"):
@@ -174,14 +174,43 @@ class SupSceneEncoder(nn.Module):
         self,
         backbone: nn.Module,
         aggregator: nn.Module,
-        deploy_head: nn.Module,
+        deploy_head: Optional[nn.Module] = None,
         return_cls_token: bool = False,  
+        use_bn: bool = True,
+        whitening: bool = False,
+        whitening_dim: int = 256,
+        final_norm: bool = True,
     ):
         super().__init__()
         self.backbone = backbone
         self.aggregator = aggregator
         self.deploy_head = deploy_head
         self.return_cls_token = return_cls_token
+        self.use_bn = bool(use_bn)
+        self.whitening = bool(whitening)
+        self.final_norm = bool(final_norm)
+
+        feat_dim = getattr(self.aggregator, "output_dim", None)
+        if feat_dim is None:
+            raise ValueError("Aggregator must expose `output_dim` to build BN/whitening.")
+
+        if self.use_bn:
+            self.bn = nn.BatchNorm1d(feat_dim, affine=True)
+            nn.init.constant_(self.bn.weight, 1)
+            nn.init.constant_(self.bn.bias, 0)
+        else:
+            self.bn = nn.Identity()
+
+        if self.whitening:
+            if whitening_dim > feat_dim:
+                raise ValueError(
+                    f"whitening_dim ({whitening_dim}) cannot be greater than aggregator output dim ({feat_dim})"
+                )
+            self.whitening_layer = nn.Linear(feat_dim, whitening_dim, bias=True)
+            self._output_dim = int(whitening_dim)
+        else:
+            self.whitening_layer = nn.Identity()
+            self._output_dim = int(feat_dim)
 
         # If CLS aggregator is used and backbone supports it, enable token output
         if isinstance(self.aggregator, CLSTokenAgg) and hasattr(self.backbone, "return_cls_token"):
@@ -190,11 +219,44 @@ class SupSceneEncoder(nn.Module):
 
     @property
     def output_dim(self) -> Optional[int]:
-        if hasattr(self.deploy_head, "output_dim"):
+        if self.deploy_head is not None and hasattr(self.deploy_head, "output_dim"):
             dim = getattr(self.deploy_head, "output_dim", None)
             if dim is not None:
                 return int(dim)
-        return None
+        return int(self._output_dim)
+
+    @torch.no_grad()
+    def init_whitening(self, X: torch.Tensor, eps: float = 1e-4) -> None:
+        if not self.whitening or not isinstance(self.whitening_layer, nn.Linear):
+            return
+
+        device = self.whitening_layer.weight.device
+        d_in = self.whitening_layer.in_features
+        d_out = self.whitening_layer.out_features
+
+        X = X.to(device).float()
+        if X.dim() != 2 or X.size(1) != d_in:
+            raise ValueError(f"X should be (N, {d_in}), got {tuple(X.shape)}")
+
+        n = X.size(0)
+        X64 = X.double()
+        mean = X64.mean(dim=0)
+        Xc = X64 - mean
+
+        cov = (Xc.t() @ Xc) / max(n - 1, 1)
+        cov = cov + eps * torch.eye(d_in, device=device, dtype=torch.float64)
+
+        S, U = torch.linalg.eigh(cov)
+        idx = torch.argsort(S, descending=True)[:d_out]
+        S = S[idx]
+        U = U[:, idx]
+
+        whitening_matrix = U * torch.rsqrt(S).unsqueeze(0)
+        new_weight = whitening_matrix.t().float()
+        new_bias = (-(mean @ whitening_matrix)).float()
+
+        self.whitening_layer.weight.data.copy_(new_weight)
+        self.whitening_layer.bias.data.copy_(new_bias)
 
     def forward(self, images: torch.Tensor) -> torch.Tensor:
         """Forward.
@@ -211,8 +273,15 @@ class SupSceneEncoder(nn.Module):
         # aggregator forward
         z = self.aggregator(out)
 
+        z = self.bn(z)
+        z = self.whitening_layer(z)
+
         # optional deploy head
-        z = self.deploy_head(z)
+        if self.deploy_head is not None:
+            z = self.deploy_head(z)
+
+        if self.final_norm:
+            z = F.normalize(z, p=2, dim=-1)
         return z
 
     def load_weights(
@@ -227,55 +296,11 @@ class SupSceneEncoder(nn.Module):
             map_location: torch.load map location.
         """
         weights_type = weights_cfg.get('type', 'file')
-        
-        if weights_type == 'salad':
-            self._load_salad_weights(weights_cfg, map_location)
-        elif weights_type == 'file':
+
+        if weights_type == 'file':
             self._load_file_weights(weights_cfg, map_location)
         else:
             raise ValueError(f"Unsupported weights type: {weights_type}")
-    
-    def _load_salad_weights(
-        self,
-        weights_cfg: Dict[str, Any],
-        map_location: Union[str, torch.device, None] = None,
-    ):
-        SALAD_URL = 'https://github.com/serizba/salad/releases/download/v1.0.0/dino_salad.ckpt'
-        
-        print(f"[SupSceneEncoder] Loading pretrained SALAD weights")
-        
-        try:
-
-            state_dict = torch.hub.load_state_dict_from_url(
-                SALAD_URL,
-                map_location=map_location or torch.device('cpu')
-            )
-
-            bb_state = {}
-            agg_state = {}
-            
-            for k, v in state_dict.items():
-                if k.startswith("backbone."):
-                    bb_state[k.replace("backbone.", "")] = v
-                elif k.startswith("aggregator."):
-                    agg_state[k.replace("aggregator.", "")] = v
-                else:
-                    agg_state[k] = v
-            
-            if bb_state:
-                inc = self.backbone.load_state_dict(bb_state, strict=False)
-                bb_missing = getattr(inc, "missing_keys", [])
-                bb_unexpected = getattr(inc, "unexpected_keys", [])
-                print(f"[SupSceneEncoder] Loaded backbone weights (missing={len(bb_missing)}, unexpected={len(bb_unexpected)})")
-            if agg_state:
-                inc = self.aggregator.load_state_dict(agg_state, strict=False)
-                agg_missing = getattr(inc, "missing_keys", [])
-                agg_unexpected = getattr(inc, "unexpected_keys", [])
-                print(f"[SupSceneEncoder] Loaded aggregator weights (missing={len(agg_missing)}, unexpected={len(agg_unexpected)})")
-            
-        except Exception as e:
-            print(f"[SupSceneEncoder] Failed to load SALAD weights: {e}")
-            raise
     
     def _load_file_weights(
         self,
@@ -360,17 +385,29 @@ def create_encoder(cfg: Dict[str, Any]) -> SupSceneEncoder:
             a["in_dim"] = getattr(bb, "output_dim")
     agg = build_aggregator(agg_cfg)
 
-    # 3) Deploy head
+    # 3) Deploy head (optional; default path keeps projection disabled)
     head_cfg = dict(cfg.get("deploy_head") or {})
     head = None
     if head_cfg:
-        if head_cfg.get("args") is not None:
-            hargs = head_cfg["args"]
+        hargs = head_cfg.get("args", {}) or {}
+        use_projection = bool(hargs.get("use_projection", False))
+        has_out_dim = hargs.get("out_dim", None) is not None
+        if use_projection or has_out_dim:
             if "in_dim" not in hargs:
                 hargs["in_dim"] = getattr(agg, "output_dim")
-        head = build_deploy_head(head_cfg)
+            head_cfg["args"] = hargs
+            head = build_deploy_head(head_cfg)
 
-    enc = SupSceneEncoder(backbone=bb, aggregator=agg, deploy_head=head)
+    model_cfg = cfg or {}
+    enc = SupSceneEncoder(
+        backbone=bb,
+        aggregator=agg,
+        deploy_head=head,
+        use_bn=bool(model_cfg.get("use_bn", True)),
+        whitening=bool(model_cfg.get("whitening", False)),
+        whitening_dim=int(model_cfg.get("whitening_dim", 256)),
+        final_norm=bool(model_cfg.get("final_norm", True)),
+    )
 
     # # 4) Optional PEFT
     # peft_cfg = cfg.get("peft")

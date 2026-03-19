@@ -39,6 +39,7 @@ def build_dataset(config: SupSceneConfig, split: str = "train") -> GL3DSubgraphD
         split_file = data_cfg.split_file
     elif split == "val":
         split_file = data_cfg.val_split_file
+    
     else:
         raise ValueError(f"Unknown split: {split}")
 
@@ -58,6 +59,7 @@ def build_dataset(config: SupSceneConfig, split: str = "train") -> GL3DSubgraphD
         scenes_per_epoch=data_cfg.scenes_per_epoch,
         samples_per_scene=data_cfg.samples_per_scene,
         teacher_name=data_cfg.teacher_name,
+        min_images_per_scene=data_cfg.min_images_per_scene,
     )
     return ds
 
@@ -118,7 +120,7 @@ def build_task_manager(config: SupSceneConfig, in_dim: int) -> TaskManager:
     task_cfg = config.task
 
     task_cfgs = [
-        TaskConfig(name="contrast", enabled=task_cfg.contrast_enabled, head_name="contrast_head", loss_name="contrast_loss", loss_weight=task_cfg.contrast_weight),
+        TaskConfig(name="contrast", enabled=task_cfg.contrast_enabled, head_name=None, loss_name="contrast_loss", loss_weight=task_cfg.contrast_weight),
         # TaskConfig(name="huber", enabled=task_cfg.huber_enabled, head_name="overlap_head", loss_name="huber_loss", loss_weight=task_cfg.huber_weight),
         # TaskConfig(name="lowrank", enabled=task_cfg.lowrank_enabled, head_name="cluster_head", loss_name="lowrank_loss", loss_weight=task_cfg.lowrank_weight),
         # TaskConfig(name="distill", enabled=task_cfg.distill_enabled, head_name="distill_head", loss_name="distill_loss", loss_weight=task_cfg.distill_weight),

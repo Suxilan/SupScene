@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from itertools import chain
 from accelerate import Accelerator
 import torch
@@ -13,7 +13,7 @@ from .models.heads import (
 )
 
 from .losses import (
-    SupConLoss,
+    MultiSimilarityLoss,
     DistillLoss,
 )
 
@@ -106,14 +106,17 @@ class TaskManager:
             loss_type = cfg.get('type')
             loss_params = cfg.get('params', {})
             
-            if loss_type == 'SupConLoss':
-                losses[loss_name] = SupConLoss(
-                    tau=loss_params.get('tau', 0.1),
-                    mode=loss_params.get('mode', 'soft'),
-                    gamma=loss_params.get('gamma', 0.1),
+            if loss_type == 'MultiSimilarityLoss':
+                losses[loss_name] = MultiSimilarityLoss(
                     pos_th=loss_params.get('pos_th', 0.25),
                     exclude_self=loss_params.get('exclude_self', True),
                     eps=loss_params.get('eps', 1e-8),
+                    alpha=loss_params.get('alpha', 2.0),
+                    beta=loss_params.get('beta', 50.0),
+                    base=loss_params.get('base', 0.5),
+                    rank_weight=loss_params.get('rank_weight', 10.0),
+                    ov_margin=loss_params.get('ov_margin', 0.05),
+                    sim_margin=loss_params.get('sim_margin', 0.05),
                 )
             elif loss_type == 'DistillLoss':
                 losses[loss_name] = DistillLoss(
@@ -196,8 +199,7 @@ class TaskManager:
                 
                 # Compute the appropriate loss for each task
                 if task_cfg.name == "contrast":
-                    # contrastive loss
-                    loss = loss_fn(task_out, overlap, pair_mask, accelerator)
+                    loss = loss_fn(task_out, overlap, pair_mask)
                 elif task_cfg.name == "distill":
                     # distillation loss
                     loss = loss_fn(task_out, teacher_features, pair_mask, node_mask)
@@ -208,10 +210,24 @@ class TaskManager:
                     # regularization loss (may return extra regularization info)
                     loss, reg_dict = loss_fn(task_out, node_mask)
                     losses.update(reg_dict)
-                # Apply task weight
-                weighted_loss = loss * task_cfg.loss_weight
-                losses[f"{task_cfg.name}_loss"] = weighted_loss
-                total_loss = total_loss + weighted_loss
+                if isinstance(loss, dict):
+                    loss_main = loss.get("main_loss", None)
+                    loss_aux = loss.get("aux_loss", None)
+                    loss_total = loss.get("loss", None)
+                    if loss_total is None:
+                        raise ValueError(f"Loss dict for task {task_cfg.name} must include key 'loss'")
+
+                    weighted_total = loss_total * task_cfg.loss_weight
+                    losses[f"{task_cfg.name}_loss"] = weighted_total
+                    if loss_main is not None:
+                        losses[f"{task_cfg.name}_main_loss"] = loss_main * task_cfg.loss_weight
+                    if loss_aux is not None:
+                        losses[f"{task_cfg.name}_aux_loss"] = loss_aux * task_cfg.loss_weight
+                    total_loss = total_loss + weighted_total
+                else:
+                    weighted_loss = loss * task_cfg.loss_weight
+                    losses[f"{task_cfg.name}_loss"] = weighted_loss
+                    total_loss = total_loss + weighted_loss
             except Exception as e:
                 printf(f"[TaskManager] Failed to compute loss for task {task_cfg.name}: {e}")
                 continue
@@ -281,14 +297,17 @@ head_cfgs = {
 
 loss_cfgs = {
     "contrast_loss": {
-        "type": "SupConLoss",
+        "type": "MultiSimilarityLoss",
         "params": {
-            "tau": 0.1,
-            "mode": "soft",          # "soft" or "hard"
-            "gamma": 0.8,
             "pos_th": 0.25,
             "exclude_self": True,
-            "eps": 1e-8
+            "eps": 1e-8,
+            "alpha": 2.0,
+            "beta": 50.0,
+            "base": 0.5,
+            "rank_weight": 10.0,
+            "ov_margin": 0.05,
+            "sim_margin": 0.05,
         }
     },
     "distill_loss": {

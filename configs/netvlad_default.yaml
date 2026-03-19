@@ -12,10 +12,11 @@ data:
   samples_per_scene: null
   scenes_per_epoch: null
   shuffle: true
-  split_file: data/dataset_split/train.txt
+  split_file: data/GL3D/train
   teacher_name: null
-  topk_per_hop: 64
-  val_split_file: data/dataset_split/val.txt
+  topk_per_hop: 32
+  min_images_per_scene: 0
+  val_split_file: data/GL3D/test
 head:
   contrast_head:
     params:
@@ -41,13 +42,16 @@ log:
 loss:
   contrast_loss:
     params:
+      alpha: 2.0
+      base: 0.5
+      beta: 50.0
       eps: 1.0e-08
       exclude_self: true
-      gamma: 0.7
-      mode: soft
+      ov_margin: 0.05
       pos_th: 0.25
-      tau: 0.1
-    type: SupConLoss
+      rank_weight: 10.0
+      sim_margin: 0.05
+    type: MultiSimilarityLoss
   distill_loss:
     params:
       distill_type: relation

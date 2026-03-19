@@ -1,5 +1,5 @@
 data:
-  batch_size: 2
+  batch_size: 1
   diag_weight: 0.1
   image_size: 322
   iou_thresh: 0.2
@@ -12,19 +12,23 @@ data:
   samples_per_scene: 1
   scenes_per_epoch: null
   shuffle: true
-  split_file: data/dataset_split/train.txt
+  split_file: data/GL3D/test
   teacher_name: null
-  topk_per_hop: 64
-  val_split_file: data/dataset_split/val.txt
-head:
+  topk_per_hop: 32
+  min_images_per_scene: 0
+  val_split_file: data/GL3D/test
+head: 
   contrast_head:
     params:
-      hidden_dim: 2048
-      last_bn: false
-      nlayers: 2
-      out_dim: 256
-      style: moco
-    type: ContrastiveHead
+      alpha: 2.0
+      base: 0.5
+      beta: 50.0
+      eps: 1.0e-08
+      exclude_self: true
+      ov_margin: 0.05
+      pos_th: 0.25
+      rank_weight: 10.0
+      sim_margin: 0.05
 log:
   eval_interval: 1
   eval_on_start: true
@@ -33,21 +37,24 @@ log:
   log_with: wandb
   monitor_metric: metric/recall@25
   monitor_mode: max
-  output_dir: experiments/divlad
+  output_dir: experiments/scpp
   save_interval: 1
   wandb_config: {}
-  wandb_name: DiVLAD
+  wandb_name: SCPP
   wandb_project: SupScene
 loss:
   contrast_loss:
     params:
+      alpha: 2.0
+      base: 0.5
+      beta: 50.0
       eps: 1.0e-08
       exclude_self: true
-      gamma: 0.7
-      mode: soft
+      ov_margin: 0.05
       pos_th: 0.25
-      tau: 0.1
-    type: SupConLoss
+      rank_weight: 10.0
+      sim_margin: 0.05
+    type: MultiSimilarityLoss
   distill_loss:
     params:
       distill_type: relation
@@ -63,14 +70,14 @@ metric:
 model:
   aggregator:
     args: {}
-    name: divlad
+    name: scpp
   backbone:
     args:
-      model_name: dinov2_vitb14
-      num_trainable_blocks: 1
-      return_attn_maps: true
-      return_cls_token: false
-    name: dinov2
+      backbone_name: "resnet50"
+      pretrained: true
+      unfreeze_n_blocks: 1
+      crop_last_block: true
+    name: resnet
   deploy_head:
     args: {}
     name: deploy_head

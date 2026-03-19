@@ -1,7 +1,7 @@
-from .contrast_loss import SupConLoss
+from .multisimilarity_loss import MultiSimilarityLoss
 from .distill_loss import DistillLoss
 
 __all__ = [
-    "SupConLoss",
+    "MultiSimilarityLoss",
     "DistillLoss",  
 ]

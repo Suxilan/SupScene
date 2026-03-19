@@ -1,12 +1,61 @@
 import os
 import math
 import random
-from typing import List, Dict, Optional
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
 
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+from torchvision.transforms import v2 as T2
 from .scenegraph import SceneGraph, read_lines
+
+def resolve_scene_dirs(root_dir: str, split_arg: str) -> Tuple[List[str], List[str]]:
+    split_path = Path(split_arg)
+    dir_candidates = []
+    if split_path.exists():
+        dir_candidates.append(split_path)
+    dir_candidates.append(Path(root_dir) / split_arg)
+    dir_candidates.append(Path(root_dir) / "GL3D" / split_arg)
+
+    for cand in dir_candidates:
+        if cand.exists():
+            if cand.is_dir():
+                scene_paths = sorted([p for p in cand.iterdir() if p.is_dir()], key=lambda x: x.name)
+                return [str(p) for p in scene_paths], [p.name for p in scene_paths]
+            if cand.is_file():
+                scene_ids = read_lines(str(cand))
+                base_dir = Path(root_dir) / "GL3D"
+                split_name = cand.stem.lower()
+                prefer_train = split_name.startswith("train")
+                prefer_test = split_name.startswith("test") or split_name.startswith("val")
+
+                scene_dirs: List[str] = []
+                for sid in scene_ids:
+                    choices = []
+                    if prefer_train:
+                        choices.append(base_dir / "train" / sid)
+                    if prefer_test:
+                        choices.append(base_dir / "test" / sid)
+                    choices.extend([
+                        base_dir / sid,
+                        base_dir / "train" / sid,
+                        base_dir / "test" / sid,
+                    ])
+
+                    resolved = None
+                    for p in choices:
+                        if p.exists() and p.is_dir():
+                            resolved = p
+                            break
+
+                    # Keep a deterministic fallback path for clearer downstream errors.
+                    if resolved is None:
+                        resolved = choices[0]
+                    scene_dirs.append(str(resolved))
+                return scene_dirs, scene_ids
+    raise FileNotFoundError(f"Split path not found: {split_arg}")
+
 
 class SubgraphSampler:
     """Subgraph sampler with uniform, anchor expansion, or balanced modes.
@@ -208,8 +257,7 @@ class GL3DSubgraphDataset(Dataset):
         """
         super().__init__()
         self.root_dir = root_dir
-        self.split_list = read_lines(split_txt)
-        self.scene_dirs = [os.path.join(root_dir, "GL3D", sid) for sid in self.split_list]
+        self.scene_dirs, self.split_list = resolve_scene_dirs(root_dir, split_txt)
         self.teacher_name = teacher_name
         self.adaptive_sampling = adaptive_sampling
         self.min_images_per_scene = int(min_images_per_scene)
@@ -243,26 +291,15 @@ class GL3DSubgraphDataset(Dataset):
             self.samples_per_scene = int(samples_per_scene or 1)
             self.samples_per_scene_list = None
 
-        # Optional image transforms (cv2 + albumentations)
+        # Optional image transforms (PIL + torchvision)
         self.tf = None
-        self._cv2_ok = False
         if self.load_images:
-            try:
-                import cv2  
-                import albumentations as A  
-                from albumentations.pytorch import ToTensorV2  
-
-                self._cv2_ok = True
-            except Exception as e:
-                raise ImportError(
-                    "Install opencv-python and albumentations to use load_images=True"
-                ) from e
-
-            self.tf = A.Compose(
+            self.tf = T2.Compose(
                 [
-                    A.Resize(height=self.img_size, width=self.img_size),
-                    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-                    ToTensorV2(),
+                    T2.ToImage(),
+                    T2.Resize(size=(self.img_size, self.img_size), interpolation=T2.InterpolationMode.BICUBIC, antialias=True),
+                    T2.ToDtype(torch.float32, scale=True),
+                    T2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ]
             )
 
@@ -367,15 +404,11 @@ class GL3DSubgraphDataset(Dataset):
         Returns:
             torch.Tensor: (3, H, W) float tensor.
         """
-        assert self._cv2_ok, "cv2/albumentations not available"
-        import cv2
+        from PIL import Image
 
-        im = cv2.imread(path, cv2.IMREAD_COLOR)
-        if im is None:
-            raise FileNotFoundError(f"Cannot load image: {path}")
-        im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
+        im = Image.open(path).convert("RGB")
         assert self.tf is not None, "Transforms not initialized; set load_images=True in dataset."
-        return self.tf(image=im)["image"]
+        return self.tf(im)
 
     def __getitem__(self, idx: int) -> Dict:
         """Assemble one sample consisting of a subgraph and optional images/teacher.

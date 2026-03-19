@@ -1,11 +1,10 @@
 import os
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Callable
 import torch
 from torch.utils.data import Dataset
-import cv2
 import numpy as np
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+from PIL import Image
+from torchvision.transforms import v2 as T2
 from .scenegraph import SceneGraph
 
 
@@ -15,7 +14,7 @@ class GL3DBatchDataset(Dataset):
     Args:
         scene_dirs: List of scene directories (…/GL3D/scene_id)
         img_size: Square resize target.
-        transform: Albumentations pipeline. If None, a default IMAGENET norm pipeline is used.
+        transform: Torchvision/PIL transform pipeline. If None, a default IMAGENET norm pipeline is used.
         return_index: If True, `__getitem__` returns (image, idx); else returns image only.
 
     Notes:
@@ -26,7 +25,7 @@ class GL3DBatchDataset(Dataset):
         self,
         scene_dirs: List[str],
         img_size: int = 322,
-        transform: Optional[A.Compose] = None,
+        transform: Optional[Callable[[Image.Image], torch.Tensor]] = None,
         return_index: bool = True,
     ):
         self.scene_dirs = scene_dirs
@@ -55,10 +54,11 @@ class GL3DBatchDataset(Dataset):
                 continue
 
         # transforms
-        self.transform = transform or A.Compose([
-            A.Resize(self.img_size, self.img_size),
-            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ToTensorV2(),
+        self.transform = transform or T2.Compose([
+            T2.ToImage(),
+            T2.Resize(size=(self.img_size, self.img_size), interpolation=T2.InterpolationMode.BICUBIC, antialias=True),
+            T2.ToDtype(torch.float32, scale=True),
+            T2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
         
         print(f"GL3DBatchDataset: scenes={len(self.scene_info)} images={len(self.image_paths)}")
@@ -69,11 +69,8 @@ class GL3DBatchDataset(Dataset):
     def __getitem__(self, idx: int):
         path = self.image_paths[idx]
         try:
-            im = cv2.imread(path, cv2.IMREAD_COLOR)
-            if im is None:
-                raise ValueError("cv2.imread returned None")
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            x = self.transform(image=im)["image"]  # (3,H,W)
+            im = Image.open(path).convert("RGB")
+            x = self.transform(im)  # (3,H,W)
         except Exception as e:
             print(f"[GL3DBatchDataset] warn: bad image {path}: {e}")
             x = torch.zeros(3, self.img_size, self.img_size)

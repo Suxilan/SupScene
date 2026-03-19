@@ -17,12 +17,12 @@ from utils import printf
 @dataclass
 class DataConfig:
     root_dir: str = "data"
-    split_file: str = "data/dataset_split/train.txt"
-    val_split_file: str = "data/dataset_split/val.txt"
+    split_file: str = "data/GL3D/train"
+    val_split_file: str = "data/GL3D/test"
     n_sub: int = 128
     sampler_mode: str = "anchor_expand"  # anchor_expand, random, density
     iou_thresh: float = 0.2
-    topk_per_hop: int = 64
+    topk_per_hop: int = 32
     load_images: bool = True
     image_size: int = 322
     scenes_per_epoch: Optional[int] = None  # None=all scenes
@@ -35,6 +35,7 @@ class DataConfig:
     num_workers: int = 8
     pin_memory: bool = True
     shuffle: bool = True
+    min_images_per_scene: int = 0
 
 
 @dataclass 
@@ -49,7 +50,7 @@ class ModelConfig:
         }})
     
     aggregator: Dict[str, Any] = field(default_factory=lambda: {
-        "name": "salad", 
+        "name": "scpp", 
         "args": {}
     })
     
@@ -113,14 +114,17 @@ class HeadConfig:
 @dataclass
 class LossConfig:
     contrast_loss: Dict[str, Any] = field(default_factory=lambda: {
-        "type": "SupConLoss",
+        "type": "MultiSimilarityLoss",
         "params": {
-            "tau": 0.1,
-            "mode": "soft",          # "soft" or "hard"
-            "gamma": 0.7,
             "pos_th": 0.25,
             "exclude_self": True,
-            "eps": 1e-8
+            "eps": 1e-8,
+            "alpha": 2.0,
+            "beta": 50.0,
+            "base": 0.5,
+            "rank_weight": 10.0,
+            "ov_margin": 0.05,
+            "sim_margin": 0.05,
         }
     })
     distill_loss: Dict[str, Any] = field(default_factory=lambda: {
@@ -174,7 +178,7 @@ class OptimConfig:
 
 @dataclass
 class LogConfig:
-    output_dir: str = "experiments/salad"
+    output_dir: str = "experiments/scpp"
     log_interval: int = 10
     eval_interval: int = 1
     save_interval: int = 1
@@ -182,7 +186,7 @@ class LogConfig:
     
     log_with: str = "wandb"  # wandb, tensorboard, None
     wandb_project: str = "SupScene"
-    wandb_name: Optional[str] = "SALAD"
+    wandb_name: Optional[str] = "SCPP"
     wandb_config: Dict[str, Any] = field(default_factory=dict)
     
     eval_on_start: bool = True
@@ -330,12 +334,24 @@ def parse_args():
 
 
 def load_config(config_path: Optional[str] = None, args: Optional[argparse.Namespace] = None) -> SupSceneConfig:
-    if config_path and os.path.exists(config_path):
-        config = SupSceneConfig.from_yaml(config_path)
-        printf(f"✅ successfully loading config from: {config_path}")
+    resolved_path: Optional[str] = None
+    if config_path:
+        if os.path.exists(config_path):
+            resolved_path = config_path
+        else:
+            cfg_in_configs = os.path.join("configs", config_path)
+            if os.path.exists(cfg_in_configs):
+                resolved_path = cfg_in_configs
+
+    if resolved_path is not None:
+        config = SupSceneConfig.from_yaml(resolved_path)
+        printf(f"✅ successfully loading config from: {resolved_path}")
     else:
         config = create_default_config()
-        printf("✅ use default config")
+        if config_path:
+            printf(f"⚠️ config not found: {config_path}, fallback to default config")
+        else:
+            printf("✅ use default config")
 
     if args:
         config.update_from_args(args)

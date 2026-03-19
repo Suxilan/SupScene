@@ -1,5 +1,4 @@
 import numpy as np
-import cv2
 from PIL import Image
 import matplotlib.cm as cm 
 
@@ -45,7 +44,10 @@ def create_overlay_batch(original_images: np.ndarray,
             enhanced_map = (combined_map - combined_map.min()) / (combined_map.max() - combined_map.min())
         
         # c. Resize and apply colormap
-        resized_map = cv2.resize(enhanced_map, (img_w, img_h), interpolation=cv2.INTER_LINEAR)
+        resized_map = np.array(
+            Image.fromarray((enhanced_map * 255).astype(np.uint8), mode="L").resize((img_w, img_h), resample=Image.BILINEAR),
+            dtype=np.float32,
+        ) / 255.0
         heatmap_rgba = cmap(resized_map, bytes=False)
         
         # d. Control alpha channel
@@ -84,11 +86,7 @@ if __name__ == '__main__':
     
     original_images_batch = []
     for path in image_paths:
-        color_img = cv2.imread(path, cv2.IMREAD_COLOR)
-        if color_img is None:
-            raise FileNotFoundError(f"Cannot load image: {path}")
-        # BGR -> RGB -> (H,W,C) -> (C,H,W)
-        rgb_img = cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB)
+        rgb_img = np.array(Image.open(path).convert("RGB"), dtype=np.uint8)
         chw_img = rgb_img.transpose(2, 0, 1)
         original_images_batch.append(chw_img)
     
@@ -158,9 +156,6 @@ if __name__ == '__main__':
     # Save the first overlaid image for inspection
     first_overlay_image_chw = overlay_result_batch[0]
     first_overlay_image_hwc = first_overlay_image_chw.transpose(1, 2, 0)
-    # Pillow uses RGB; OpenCV expects BGR for saving
-    first_overlay_image_bgr = cv2.cvtColor(first_overlay_image_hwc, cv2.COLOR_RGB2BGR)
-    
     save_path_test = "attention_overlay_batch_test.png"
-    cv2.imwrite(save_path_test, first_overlay_image_bgr)
+    Image.fromarray(first_overlay_image_hwc.astype(np.uint8)).save(save_path_test)
     print(f"✅ Batch processing succeeded, first sample saved to: {save_path_test}")

@@ -215,25 +215,46 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# ---- iGL3D dataset: ignore all scene subfolders but keep the top-level scenes.txt ----
-# Ignore everything under the GL3D directory (all scene folders and their contents)
-data/GL3D/*
-data/1dsfm/*
-# Except keep the top-level index file
-!data/GL3D/scenes.txt
-# If you want to keep an empty GL3D directory in the repo, add a .gitkeep and unignore it:
-# !GL3D/.gitkeep
-# Note: if the files inside GL3D are already tracked by git, run:
-#   git rm -r --cached GL3D/*
-# then commit the removal so .gitignore takes effect.
-# ignore everything in third_party except the .gitkeep placeholder
-/third_party/*
+# ==============================
+# Project-specific open-source rules
+# ==============================
 
-# experiments: ignore all generated/runtime files under experiments/ except
-# keep YAML config files and any config.json files (may be at any depth).
+# Local datasets (including symlink targets)
+data/GL3D
+data/1dsfm
+
+# Keep split metadata if present
+!data/dataset_split/
+!data/dataset_split/train.txt
+!data/dataset_split/val.txt
+
+# Training artifacts and runtime outputs
 experiments/**
 !/experiments/**/
-#! allow common config filenames anywhere under experiments
 !experiments/**/config.json
 !experiments/**/config.yaml
-experiments/**/wandb/*
+
+wandb/
+outputs/
+logs/
+runs/
+
+# Local caches and ad-hoc visualization outputs
+cache/
+vis/pca_feature_map/*.png
+
+# Model checkpoints and serialized weights
+*.ckpt
+*.pth
+*.pt
+*.bin
+
+# Large media artifacts produced during experiments
+*.mp4
+*.avi
+*.gif
+
+# Third-party local caches
+third_party/**/__pycache__/
+third_party/**/.pytest_cache/
+third_party/**/.mypy_cache/

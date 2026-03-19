@@ -363,7 +363,9 @@ def compute_global_retrieval_metrics(
                 if pred_idx in pos_indices:
                     hits_so_far += 1
                     ap += hits_so_far / (i + 1)
-            ap = ap / min(len(pos_indices), k) if len(pos_indices) > 0 else 0.0
+            # Align with GeoMetricLab `compute_metrics`: AP@k is normalized by
+            # the total number of positives for the query, not by min(num_pos, k).
+            ap = ap / len(pos_indices) if len(pos_indices) > 0 else 0.0
             ap_scores.append(ap)
 
             ideal_dcg = sum(1.0 / np.log2(i + 2) for i in range(min(len(pos_indices), k)))

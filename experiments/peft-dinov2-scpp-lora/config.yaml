@@ -1,10 +1,11 @@
 data:
-  batch_size: 2
+  batch_size: 1
   diag_weight: 0.1
   image_size: 322
   iou_thresh: 0.2
   load_images: true
-  n_sub: 128
+  min_images_per_scene: 0
+  n_sub: 80
   num_workers: 8
   pin_memory: true
   root_dir: data
@@ -12,10 +13,10 @@ data:
   samples_per_scene: null
   scenes_per_epoch: null
   shuffle: true
-  split_file: data/dataset_split/train.txt
+  split_file: data/GL3D/train
   teacher_name: null
-  topk_per_hop: 64
-  val_split_file: data/dataset_split/val.txt
+  topk_per_hop: 32
+  val_split_file: data/GL3D/test
 head:
   contrast_head:
     params:
@@ -31,23 +32,23 @@ log:
   eval_per_epochs: 1
   log_interval: 10
   log_with: wandb
-  monitor_metric: metric/recall@25
+  monitor_metric: metric/map@25
   monitor_mode: max
-  output_dir: experiments/divlad
+  output_dir: experiments/peft-dinov2-scpp-lora
   save_interval: 1
   wandb_config: {}
-  wandb_name: DiVLAD
+  wandb_name: peft-dinov2-scpp-lora
   wandb_project: SupScene
 loss:
   contrast_loss:
     params:
+      alpha: 2.0
+      base: 0.5
+      beta: 50.0
       eps: 1.0e-08
       exclude_self: true
-      gamma: 0.7
-      mode: soft
       pos_th: 0.25
-      tau: 0.1
-    type: SupConLoss
+    type: MultiSimilarityLoss
   distill_loss:
     params:
       distill_type: relation
@@ -63,16 +64,26 @@ metric:
 model:
   aggregator:
     args: {}
-    name: divlad
+    name: scpp
   backbone:
     args:
+      lora_alpha: 16
+      lora_bias: none
+      lora_dropout: 0.1
+      lora_r: 16
+      lora_targets:
+      - attn.qkv
+      - attn.proj
+      - mlp.fc1
+      - mlp.fc2
       model_name: dinov2_vitb14
-      num_trainable_blocks: 1
-      return_attn_maps: true
+      num_trainable_blocks: 12
+      return_attn_maps: false
       return_cls_token: false
     name: dinov2
   deploy_head:
-    args: {}
+    args:
+      use_projection: false
     name: deploy_head
   ema_decay: 0.999
   ema_use_num_updates: true
@@ -87,14 +98,14 @@ optim:
   optimizer: adamw
   scheduler: cosine
   use_conflictfree: false
-  warmup_pct: 0.1
+  warmup_pct: 0.5
   warmup_start_factor: 0.01
   weight_decay: 0.01
 system:
   deterministic: true
   device: cuda
   device_specific: false
-  mixed_precision: 'no'
+  mixed_precision: bf16
   seed: 42
   use_accelerate: true
 task:

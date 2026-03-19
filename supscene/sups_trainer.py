@@ -535,8 +535,7 @@ class SupSceneTrainer(BaseTrainer):
             "AdaptiveGeMPool",
             "GeMPool",
             "NetVLAD",
-            "SALAD",
-            "DiVLAD",
+            "SCPP",
         }
         if agg_name not in supported:
             self.logger.warning(f"Unsupported aggregator for viz: {agg_name}")

@@ -10,9 +10,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
+from PIL import Image
+from torchvision.transforms import v2 as T2
 
 # --- 依赖你已有的数据工具 ---
-from .datasets.gl3d_subgraph_dataset import read_lines
+from .datasets.gl3d_subgraph_dataset import resolve_scene_dirs
 from .datasets.gl3d_batch_dataset import GL3DBatchDataset
 
 # metrics (injectable; lightweight fallback handled in evaluator)
@@ -93,9 +95,7 @@ class SupSceneEvaluator:
             self.device = torch.device(cfg.device)
 
         # split
-        sids = read_lines(cfg.split_txt)
-        self.scene_dirs = [os.path.join(cfg.root_dir, "GL3D", sid) for sid in sids]
-        self.scene_ids = [os.path.basename(p) for p in self.scene_dirs]
+        self.scene_dirs, self.scene_ids = resolve_scene_dirs(cfg.root_dir, cfg.split_txt)
 
         # amp dtype
         self.amp_dtype = torch.float16 if cfg.use_amp and ("cuda" in str(self.device)) else None
@@ -188,18 +188,16 @@ class SupSceneEvaluator:
         # Build dataset for one scene
         G = SceneGraph(scene_dir)
         paths = G.image_paths
-        tf = A.Compose([
-            A.Resize(self.cfg.img_size, self.cfg.img_size),
-            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ToTensorV2(),
+        tf = T2.Compose([
+            T2.ToImage(),
+            T2.Resize(size=(self.cfg.img_size, self.cfg.img_size), interpolation=T2.InterpolationMode.BICUBIC, antialias=True),
+            T2.ToDtype(torch.float32, scale=True),
+            T2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-
-        import cv2
         X = []
         for p in paths:
-            im = cv2.imread(p, cv2.IMREAD_COLOR)
-            im = cv2.cvtColor(im, cv2.COLOR_BGR2RGB)
-            X.append(tf(image=im)["image"])  # (3,H,W)
+            im = Image.open(p).convert("RGB")
+            X.append(tf(im))  # (3,H,W)
         X = torch.stack(X, dim=0).to(self.device)
         dev_type = str(self.device).split(":")[0]
         with torch.amp.autocast(dev_type, enabled=self.amp_dtype is not None, dtype=self.amp_dtype or torch.float32):
