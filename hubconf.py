@@ -21,7 +21,7 @@ dependencies = ["torch", "torchvision", "numpy", "yaml", "peft", "safetensors"]
 
 
 # Replace this with your real release URL after uploading the file.
-DEFAULT_WEIGHT_URL = ""
+DEFAULT_WEIGHT_URL = "https://github.com/Suxilan/SupScene/releases/download/v0.1.0/dinov2_scpp_supscene_1536.pth"
 DEFAULT_WEIGHT_FILENAME = "dinov2_scpp_supscene_1536.pth"
 
 
