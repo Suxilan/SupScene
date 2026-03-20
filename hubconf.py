@@ -12,17 +12,50 @@ from __future__ import annotations
 
 from pathlib import Path
 from urllib.parse import urlparse
-import yaml
 from supscene.encoder import create_encoder
 
 import torch
 
-dependencies = ["torch", "torchvision", "numpy", "yaml", "peft", "safetensors"]
+dependencies = ["torch", "torchvision", "numpy", "peft", "safetensors"]
 
 
 # Replace this with your real release URL after uploading the file.
 DEFAULT_WEIGHT_URL = "https://github.com/Suxilan/SupScene/releases/latest/download/dinov2_scpp_supscene_1536.pth"
 DEFAULT_WEIGHT_FILENAME = "dinov2_scpp_supscene_1536.pth"
+
+
+# Frozen deploy-time model spec that matches released weights.
+MODEL_CFG = {
+    "backbone": {
+        "name": "dinov2",
+        "args": {
+            "model_name": "dinov2_vitb14",
+            "num_trainable_blocks": 12,
+            "return_attn_maps": False,
+            "return_cls_token": False,
+            "lora_r": 16,
+            "lora_alpha": 16,
+            "lora_dropout": 0.1,
+            "lora_bias": "none",
+            "lora_targets": ["attn.qkv", "attn.proj", "mlp.fc1", "mlp.fc2"],
+        },
+    },
+    "aggregator": {
+        "name": "scpp",
+        "args": {},
+    },
+    "deploy_head": {
+        "name": "deploy_head",
+        "args": {
+            "use_projection": False,
+        },
+    },
+    "use_bn": True,
+    "whitening": True,
+    "whitening_dim": 1536,
+    "final_norm": True,
+    "weights": None,
+}
 
 
 def _is_url(x: str) -> bool:
@@ -43,24 +76,8 @@ def _resolve_weight_path(weights: str | None) -> str | None:
     return str(p)
 
 
-def _resolve_config_path(config_path: str) -> Path:
-    p = Path(config_path)
-    if p.exists():
-        return p
-    repo_rel = Path(__file__).resolve().parent / config_path
-    if repo_rel.exists():
-        return repo_rel
-    raise FileNotFoundError(f"Config not found: {config_path}")
-
-
-def _build_model(config_path: str = "configs/peft-dinov2-scpp-lora.yaml"):
-    cfg_path = _resolve_config_path(config_path)
-    with cfg_path.open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f)
-
-    model_cfg = dict(cfg.get("model") or {})
-    model_cfg["weights"] = None
-    model = create_encoder(model_cfg)
+def _build_model():
+    model = create_encoder(dict(MODEL_CFG))
     return model
 
 
@@ -94,7 +111,6 @@ def _load_state(model: torch.nn.Module, state_or_path):
 def dinov2_scpp_supscene_1536(
     pretrained: bool = False,
     weights: str | None = None,
-    config_path: str = "configs/peft-dinov2-scpp-lora.yaml",
     map_location: str = "cpu",
 ):
     """Build SupScene encoder and optionally load released pretrained weights.
@@ -102,10 +118,9 @@ def dinov2_scpp_supscene_1536(
     Args:
         pretrained: If True, load the released weight file.
         weights: Optional local file path or URL. If provided, overrides default release URL.
-        config_path: Model config used to build architecture.
         map_location: Device string for model.to().
     """
-    model = _build_model(config_path=config_path)
+    model = _build_model()
 
     if pretrained:
         if weights is None and DEFAULT_WEIGHT_URL:
